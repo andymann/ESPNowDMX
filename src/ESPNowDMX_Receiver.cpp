@@ -29,7 +29,9 @@ ESPNowDMX_Receiver::ESPNowDMX_Receiver()
 bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   hasLastSequence = false;
   lastSequence = 0;
-  WiFi.mode(WIFI_STA);
+  if (registerInternalEspNow) {
+    WiFi.mode(WIFI_STA);
+  }
   if (registerInternalEspNow && !espNowInitialized) {
     if (esp_now_init() != ESP_OK) {
       return false;
@@ -62,6 +64,14 @@ void ESPNowDMX_Receiver::setUniverseId(uint8_t universe) {
 bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, int len) {
   if (len < PACKET_HEADER_SIZE) return false;
   if (data[0] != PACKET_TYPE_DATA_CHUNK) return false;
+#if ESPNOW_DMX_DEBUG
+  static unsigned long lastHeaderLog = 0;
+  unsigned long nowMs = millis();
+  if (nowMs - lastHeaderLog >= 1000) {
+    lastHeaderLog = nowMs;
+    ESPNOW_DMX_LOG("[RX] raw len=%d", len);
+  }
+#endif
   processPacket(data, len);
   return true;
 }
@@ -119,8 +129,26 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
     return;
   }
 
+#if ESPNOW_DMX_DEBUG
+  static unsigned long lastPacketLog = 0;
+  unsigned long packetNow = millis();
+  if (packetNow - lastPacketLog >= 500) {
+    lastPacketLog = packetNow;
+    ESPNOW_DMX_LOG("[RX] seq=%u offset=%u len=%u comp=%s", seq, offset, decompressedLen,
+                   compressionType == COMPRESSION_HEATSHRINK ? "HS" : "RAW");
+  }
+#endif
+
   if (userCallback) {
     userCallback(universe, dmxBuffer);
+#if ESPNOW_DMX_DEBUG
+    static unsigned long lastFrameLog = 0;
+    unsigned long frameNow = millis();
+    if (frameNow - lastFrameLog >= 1000) {
+      lastFrameLog = frameNow;
+      ESPNOW_DMX_LOG("[RX] DMX frame delivered (universe %u)", universe);
+    }
+#endif
   }
 }
 

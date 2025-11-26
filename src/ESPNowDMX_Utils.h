@@ -25,84 +25,136 @@ extern "C" {
 #include "heatshrink/heatshrink_decoder.h"
 }
 
+namespace {
+
+static inline bool drainEncoderOutput(heatshrink_encoder* encoder, uint8_t* output,
+                                     size_t maxOutputLen, size_t* written) {
+  size_t produced = 0;
+  while (true) {
+    if (*written >= maxOutputLen) {
+      return false;
+    }
+
+    size_t space = maxOutputLen - *written;
+    HSE_poll_res pres = heatshrink_encoder_poll(encoder, output + *written, space, &produced);
+    if (pres < 0) {
+      return false;
+    }
+
+    *written += produced;
+    if (pres != HSER_POLL_MORE) {
+      break;
+    }
+  }
+
+  return true;
+}
+
+static inline bool drainDecoderOutput(heatshrink_decoder* decoder, uint8_t* output,
+                                     size_t maxOutputLen, size_t* written) {
+  size_t produced = 0;
+  while (true) {
+    if (*written >= maxOutputLen) {
+      return false;
+    }
+
+    size_t space = maxOutputLen - *written;
+    HSD_poll_res pres = heatshrink_decoder_poll(decoder, output + *written, space, &produced);
+    if (pres < 0) {
+      return false;
+    }
+
+    *written += produced;
+    if (pres != HSDR_POLL_MORE) {
+      break;
+    }
+  }
+
+  return true;
+}
+
+} // namespace
+
 // Heatshrink compression with automatic fallback to raw if not beneficial
 // Returns compressed size, or 0 on error
 static inline size_t compressData(const uint8_t* input, size_t inputLen, uint8_t* output, size_t maxOutputLen) {
-  if (inputLen == 0 || inputLen > maxOutputLen) return 0;
-  
+  if (inputLen == 0 || maxOutputLen == 0) {
+    return 0;
+  }
+
   // Static allocation for embedded use
   static heatshrink_encoder hse;
   heatshrink_encoder_reset(&hse);
-  
+
   size_t sunk = 0;
-  size_t polled = 0;
-  size_t count = 0;
-  
-  // Sink all input data
   HSE_sink_res sres = heatshrink_encoder_sink(&hse, (uint8_t*)input, inputLen, &sunk);
   if (sres < 0 || sunk != inputLen) {
     return 0; // Compression failed
   }
-  
-  // Finish encoding
-  HSE_finish_res fres = heatshrink_encoder_finish(&hse);
-  if (fres < 0) return 0;
-  
-  // Poll for compressed output
-  while (fres == HSER_FINISH_MORE || polled == 0) {
-    HSE_poll_res pres = heatshrink_encoder_poll(&hse, &output[polled], maxOutputLen - polled, &count);
-    if (pres < 0) return 0;
-    polled += count;
-    
-    if (pres == HSER_POLL_EMPTY) {
-      fres = heatshrink_encoder_finish(&hse);
-      if (fres < 0) return 0;
+
+  size_t written = 0;
+  if (!drainEncoderOutput(&hse, output, maxOutputLen, &written)) {
+    return 0;
+  }
+
+  while (true) {
+    HSE_finish_res fres = heatshrink_encoder_finish(&hse);
+    if (fres < 0) {
+      return 0;
+    }
+
+    if (!drainEncoderOutput(&hse, output, maxOutputLen, &written)) {
+      return 0;
+    }
+
+    if (fres == HSER_FINISH_DONE) {
+      break;
     }
   }
-  
-  // Only return compressed data if it's actually smaller
-  if (polled >= inputLen) {
+
+  if (written == 0 || written >= inputLen) {
     return 0; // Not beneficial, caller should use raw
   }
-  
-  return polled;
+
+  return written;
 }
 
 // Heatshrink decompression
 // Returns decompressed size, or 0 on error
 static inline size_t decompressData(const uint8_t* input, size_t inputLen, uint8_t* output, size_t maxOutputLen) {
-  if (inputLen == 0 || inputLen > maxOutputLen) return 0;
-  
+  if (inputLen == 0 || maxOutputLen == 0) {
+    return 0;
+  }
+
   // Static allocation for embedded use
   static heatshrink_decoder hsd;
   heatshrink_decoder_reset(&hsd);
-  
+
   size_t sunk = 0;
-  size_t polled = 0;
-  size_t count = 0;
-  
-  // Sink compressed input data
   HSD_sink_res sres = heatshrink_decoder_sink(&hsd, (uint8_t*)input, inputLen, &sunk);
   if (sres < 0 || sunk != inputLen) {
     return 0; // Decompression failed
   }
-  
-  // Finish decoding
-  HSD_finish_res fres = heatshrink_decoder_finish(&hsd);
-  if (fres < 0) return 0;
-  
-  // Poll for decompressed output
-  while (fres == HSDR_FINISH_MORE || polled == 0) {
-    HSD_poll_res pres = heatshrink_decoder_poll(&hsd, &output[polled], maxOutputLen - polled, &count);
-    if (pres < 0) return 0;
-    polled += count;
-    
-    if (pres == HSDR_POLL_EMPTY) {
-      fres = heatshrink_decoder_finish(&hsd);
-      if (fres < 0) return 0;
-      if (fres == HSDR_FINISH_DONE) break;
+
+  size_t written = 0;
+  if (!drainDecoderOutput(&hsd, output, maxOutputLen, &written)) {
+    return 0;
+  }
+
+  while (true) {
+    HSD_finish_res fres = heatshrink_decoder_finish(&hsd);
+    if (fres < 0) {
+      return 0;
+    }
+
+    if (!drainDecoderOutput(&hsd, output, maxOutputLen, &written)) {
+      return 0;
+    }
+
+    if (fres == HSDR_FINISH_DONE) {
+      break;
     }
   }
-  
-  return polled;
+
+  return written;
 }

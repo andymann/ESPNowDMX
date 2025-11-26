@@ -68,3 +68,18 @@ using DMXUniverseBuffer = uint8_t[DMX_UNIVERSE_SIZE];
 
 // User callback type for receiver to receive full buffer
 using DMXReceiveCallback = void (*)(uint8_t universe, const uint8_t *dmxData);
+
+// Feature toggles (override via build_flags)
+#ifndef ESPNOW_DMX_ENABLE_COMPRESSION
+#define ESPNOW_DMX_ENABLE_COMPRESSION 1
+#endif
+
+#ifndef ESPNOW_DMX_DEBUG
+#define ESPNOW_DMX_DEBUG 0
+#endif
+
+#if ESPNOW_DMX_DEBUG
+#define ESPNOW_DMX_LOG(fmt, ...) Serial.printf("[ESPNowDMX] " fmt "\n", ##__VA_ARGS__)
+#else
+#define ESPNOW_DMX_LOG(...) do { } while (0)
+#endif

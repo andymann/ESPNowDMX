@@ -37,6 +37,7 @@ private:
   unsigned long lastSendTime;
   bool espNowInitialized;
   uint8_t universeId;
+  uint8_t broadcastAddr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
   void sendChunk(uint16_t offset, uint16_t length);
 

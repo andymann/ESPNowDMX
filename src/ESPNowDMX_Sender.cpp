@@ -25,7 +25,9 @@ ESPNowDMX_Sender::ESPNowDMX_Sender()
 }
 
 bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
-  WiFi.mode(WIFI_STA);
+  if (registerInternalEspNow) {
+    WiFi.mode(WIFI_STA);
+  }
   if (registerInternalEspNow && !espNowInitialized) {
     if (esp_now_init() != ESP_OK) {
       return false;
@@ -114,24 +116,38 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   packet[4] = (offset >> 8) & 0xFF;
   packet[5] = offset & 0xFF;
 
-  // Try heatshrink compression
+  size_t payloadSize = length;
+
+#if ESPNOW_DMX_ENABLE_COMPRESSION
+  // Try heatshrink compression when explicitly enabled
   size_t compressedSize = compressData(currentUniverse + offset, length, compBuffer, sizeof(compBuffer));
-  
-  size_t payloadSize;
   if (compressedSize > 0 && compressedSize < length) {
-    // Compression was beneficial, use it
     packet[6] = COMPRESSION_HEATSHRINK;
     memcpy(packet + PACKET_HEADER_SIZE, compBuffer, compressedSize);
     payloadSize = compressedSize;
   } else {
-    // Compression not beneficial or failed, send raw
     packet[6] = COMPRESSION_NONE;
     memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
     payloadSize = length;
   }
+#else
+  (void)compBuffer;
+  packet[6] = COMPRESSION_NONE;
+  memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
+#endif
 
   size_t sendLength = PACKET_HEADER_SIZE + payloadSize;
-  esp_now_send(nullptr, packet, sendLength);
+  esp_err_t err = esp_now_send(broadcastAddr, packet, sendLength);
+
+#if ESPNOW_DMX_DEBUG
+  static unsigned long lastLog = 0;
+  unsigned long nowMs = millis();
+  if (nowMs - lastLog >= 500) {
+    lastLog = nowMs;
+    ESPNOW_DMX_LOG("[TX] seq=%u offset=%u len=%u comp=%s err=%d", seqNumber, offset,
+                   payloadSize, packet[6] == COMPRESSION_HEATSHRINK ? "HS" : "RAW", err);
+  }
+#endif
 
   seqNumber++;
 }
