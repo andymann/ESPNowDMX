@@ -114,7 +114,11 @@ void ESPNowDMX_Sender::loop() {
                    (now - lastFullSendTime) >= fullRefreshIntervalMs;
 
   if (forceFull) {
-    if (now - lastSendTime < rapidInterval) return;
+    // Skip the rapidInterval coalescing guard here: the full-refresh
+    // period (fullRefreshIntervalMs, typically 200 ms) is the rate
+    // limiter. Letting the rapid guard delay or cancel a scheduled full
+    // refresh breaks the ≤200 ms recovery guarantee under sustained
+    // delta traffic (e.g. continuous CC automation from a DAW).
     sendRange(0, DMX_UNIVERSE_SIZE);
     lastSendTime = now;
     lastFullSendTime = now;
