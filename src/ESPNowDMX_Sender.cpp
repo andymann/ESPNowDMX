@@ -19,7 +19,12 @@
 #include "ESPNowDMX_Sender.h"
 
 ESPNowDMX_Sender::ESPNowDMX_Sender()
-  : seqNumber(0), lastSendTime(0), espNowInitialized(false), universeId(0) {
+  : seqNumber(0),
+    lastSendTime(0),
+    lastFullSendTime(0),
+    fullRefreshIntervalMs(200),
+    espNowInitialized(false),
+    universeId(0) {
   memset(currentUniverse, 0, DMX_UNIVERSE_SIZE);
   memset(prevUniverse, 0, DMX_UNIVERSE_SIZE);
 }
@@ -80,23 +85,47 @@ void ESPNowDMX_Sender::loop() {
     }
   }
 
-  if (!anyChange) {
-    if (now - lastSendTime < slowInterval) return;
-    minChanged = 0;
-    maxChanged = DMX_UNIVERSE_SIZE - 1;
-  } else {
+  // Periodic full-universe broadcast: every fullRefreshIntervalMs ms we ignore
+  // the delta and resend the whole frame. This is the only thing that lets
+  // receivers recover from a dropped delta packet while the master keeps
+  // streaming changes (e.g. continuous CC automation from a DAW). Without
+  // this the idle-resend path below never fires and slaves stay desynced
+  // until everything goes quiet.
+  bool forceFull = fullRefreshIntervalMs > 0 &&
+                   (now - lastFullSendTime) >= fullRefreshIntervalMs;
+
+  if (forceFull) {
     if (now - lastSendTime < rapidInterval) return;
+    sendRange(0, DMX_UNIVERSE_SIZE);
+    lastSendTime = now;
+    lastFullSendTime = now;
+    return;
   }
 
+  if (!anyChange) {
+    if (now - lastSendTime < slowInterval) return;
+    sendRange(0, DMX_UNIVERSE_SIZE);
+    lastSendTime = now;
+    lastFullSendTime = now;
+    return;
+  }
+
+  if (now - lastSendTime < rapidInterval) return;
+  sendRange(minChanged, maxChanged - minChanged + 1);
   lastSendTime = now;
+}
 
-  uint16_t totalLen = maxChanged - minChanged + 1;
+void ESPNowDMX_Sender::sendRange(uint16_t offset, uint16_t length) {
+  if (length == 0 || offset >= DMX_UNIVERSE_SIZE) return;
+  if (offset + length > DMX_UNIVERSE_SIZE) {
+    length = DMX_UNIVERSE_SIZE - offset;
+  }
+
   uint16_t processed = 0;
-
-  while (processed < totalLen) {
-    uint16_t remaining = totalLen - processed;
+  while (processed < length) {
+    uint16_t remaining = length - processed;
     uint16_t chunkLen = remaining > MAX_DMX_CHUNK_SIZE ? MAX_DMX_CHUNK_SIZE : remaining;
-    uint16_t chunkOffset = minChanged + processed;
+    uint16_t chunkOffset = offset + processed;
 
     sendChunk(chunkOffset, chunkLen);
 

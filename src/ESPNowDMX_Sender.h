@@ -30,16 +30,25 @@ public:
   void setChannel(uint16_t address, uint8_t value);
   void loop();
 
+  // Periodic full-universe broadcast. Acts as a recovery point so receivers
+  // that missed a delta packet eventually resync, even under continuous CC
+  // streams that would otherwise prevent the idle-refresh path from firing.
+  // 0 disables periodic full refresh. Default 200 ms.
+  void setFullRefreshInterval(unsigned long intervalMs) { fullRefreshIntervalMs = intervalMs; }
+
 private:
   uint8_t currentUniverse[DMX_UNIVERSE_SIZE];
   uint8_t prevUniverse[DMX_UNIVERSE_SIZE];
   uint16_t seqNumber;
   unsigned long lastSendTime;
+  unsigned long lastFullSendTime;
+  unsigned long fullRefreshIntervalMs;
   bool espNowInitialized;
   uint8_t universeId;
   uint8_t broadcastAddr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
   void sendChunk(uint16_t offset, uint16_t length);
+  void sendRange(uint16_t offset, uint16_t length);
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
   static void onDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status);
