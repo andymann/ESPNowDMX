@@ -18,6 +18,25 @@
 
 #include "ESPNowDMX_Sender.h"
 
+namespace {
+// Process-wide send statistics, written from the ESP-NOW send callback
+// (which fires on a Wi-Fi internal task) and read from user code on the
+// main task. Single producer / single consumer, plain volatile is OK on
+// the 32-bit values; consecutiveFailures may race by ±1 but that's fine
+// for "should I restart the radio" logic.
+volatile uint32_t g_totalSent = 0;
+volatile uint32_t g_totalFailed = 0;
+volatile uint16_t g_consecutiveFailures = 0;
+}
+
+ESPNowDMX_Sender::SendStats ESPNowDMX_Sender::getSendStats() {
+  SendStats s;
+  s.totalSent = g_totalSent;
+  s.totalFailed = g_totalFailed;
+  s.consecutiveFailures = g_consecutiveFailures;
+  return s;
+}
+
 ESPNowDMX_Sender::ESPNowDMX_Sender()
   : seqNumber(0),
     lastSendTime(0),
@@ -147,21 +166,28 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
 
   size_t payloadSize = length;
 
+  // Byte 6 packs PROTOCOL_VERSION in the high nibble and the
+  // compression flag in the low nibble. Receivers running a
+  // different PROTOCOL_VERSION will read an unknown low nibble
+  // (since the version bits look like an "unknown compression
+  // type" to them) and drop the packet — no garbled state.
+  const uint8_t versionBits = (PROTOCOL_VERSION << 4) & PROTOCOL_VERSION_MASK;
+
 #if ESPNOW_DMX_ENABLE_COMPRESSION
   // Try heatshrink compression when explicitly enabled
   size_t compressedSize = compressData(currentUniverse + offset, length, compBuffer, sizeof(compBuffer));
   if (compressedSize > 0 && compressedSize < length) {
-    packet[6] = COMPRESSION_HEATSHRINK;
+    packet[6] = versionBits | (COMPRESSION_HEATSHRINK & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, compBuffer, compressedSize);
     payloadSize = compressedSize;
   } else {
-    packet[6] = COMPRESSION_NONE;
+    packet[6] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
     payloadSize = length;
   }
 #else
   (void)compBuffer;
-  packet[6] = COMPRESSION_NONE;
+  packet[6] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
   memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
 #endif
 
@@ -174,7 +200,9 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   if (nowMs - lastLog >= 500) {
     lastLog = nowMs;
     ESPNOW_DMX_LOG("[TX] seq=%u offset=%u len=%u comp=%s err=%d", seqNumber, offset,
-                   payloadSize, packet[6] == COMPRESSION_HEATSHRINK ? "HS" : "RAW", err);
+                   payloadSize,
+                   (packet[6] & COMPRESSION_MASK) == COMPRESSION_HEATSHRINK ? "HS" : "RAW",
+                   err);
   }
 #endif
 
@@ -184,13 +212,23 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void ESPNowDMX_Sender::onDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   (void)info;
-  (void)status;
-  // Optional callback for send status
+  if (status == ESP_NOW_SEND_SUCCESS) {
+    g_totalSent++;
+    g_consecutiveFailures = 0;
+  } else {
+    g_totalFailed++;
+    if (g_consecutiveFailures < UINT16_MAX) g_consecutiveFailures++;
+  }
 }
 #else
 void ESPNowDMX_Sender::onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   (void)mac_addr;
-  (void)status;
-  // Optional callback for send status
+  if (status == ESP_NOW_SEND_SUCCESS) {
+    g_totalSent++;
+    g_consecutiveFailures = 0;
+  } else {
+    g_totalFailed++;
+    if (g_consecutiveFailures < UINT16_MAX) g_consecutiveFailures++;
+  }
 }
 #endif

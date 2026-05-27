@@ -36,6 +36,18 @@ public:
   // 0 disables periodic full refresh. Default 200 ms.
   void setFullRefreshInterval(unsigned long intervalMs) { fullRefreshIntervalMs = intervalMs; }
 
+  // Snapshot of the most recent ESP-NOW send-callback statistics.
+  // consecutiveFailures is reset to 0 on every successful broadcast;
+  // when it exceeds a host-defined threshold the host should consider
+  // the radio wedged and call ESP.restart(). totalSent / totalFailed
+  // are monotonic counters across the lifetime of the sender.
+  struct SendStats {
+    uint32_t totalSent = 0;
+    uint32_t totalFailed = 0;
+    uint16_t consecutiveFailures = 0;
+  };
+  static SendStats getSendStats();
+
 private:
   uint8_t currentUniverse[DMX_UNIVERSE_SIZE];
   uint8_t prevUniverse[DMX_UNIVERSE_SIZE];

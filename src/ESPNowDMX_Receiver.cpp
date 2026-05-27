@@ -80,7 +80,14 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
   uint8_t universe = data[1];
   uint16_t seq = (data[2] << 8) | data[3];
   uint16_t offset = (data[4] << 8) | data[5];
-  uint8_t compressionType = data[6];
+  // Byte 6: high nibble = wire-format version, low nibble = compression.
+  // Mismatched versions are dropped: a peer running a different
+  // PROTOCOL_VERSION would have a layout this build can't safely parse.
+  uint8_t version = (data[6] & PROTOCOL_VERSION_MASK) >> 4;
+  uint8_t compressionType = data[6] & COMPRESSION_MASK;
+  if (version != PROTOCOL_VERSION) {
+    return;
+  }
   const uint8_t *payload = data + PACKET_HEADER_SIZE;
   size_t payloadLen = len - PACKET_HEADER_SIZE;
 
