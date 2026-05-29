@@ -51,11 +51,13 @@ public:
 private:
   uint8_t currentUniverse[DMX_UNIVERSE_SIZE];
   uint8_t prevUniverse[DMX_UNIVERSE_SIZE];
+  uint8_t sessionId;
   uint16_t seqNumber;
   unsigned long lastSendTime;
   unsigned long lastFullSendTime;
   unsigned long fullRefreshIntervalMs;
   bool espNowInitialized;
+  bool forceFullRefreshOnNextLoop;
   uint8_t universeId;
   uint8_t broadcastAddr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 

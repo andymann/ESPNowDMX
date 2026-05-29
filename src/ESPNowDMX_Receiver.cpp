@@ -21,13 +21,15 @@
 ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
-  : lastSequence(0), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0) {
+  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
   instance = this;
 }
 
 bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
+  hasLastSessionId = false;
   hasLastSequence = false;
+  lastSessionId = 0;
   lastSequence = 0;
   if (registerInternalEspNow) {
     WiFi.mode(WIFI_STA);
@@ -78,13 +80,14 @@ bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, 
 
 void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
   uint8_t universe = data[1];
-  uint16_t seq = (data[2] << 8) | data[3];
-  uint16_t offset = (data[4] << 8) | data[5];
-  // Byte 6: high nibble = wire-format version, low nibble = compression.
+  uint8_t sessionId = data[2];
+  uint16_t seq = (data[3] << 8) | data[4];
+  uint16_t offset = (data[5] << 8) | data[6];
+  // Byte 7: high nibble = wire-format version, low nibble = compression.
   // Mismatched versions are dropped: a peer running a different
   // PROTOCOL_VERSION would have a layout this build can't safely parse.
-  uint8_t version = (data[6] & PROTOCOL_VERSION_MASK) >> 4;
-  uint8_t compressionType = data[6] & COMPRESSION_MASK;
+  uint8_t version = (data[7] & PROTOCOL_VERSION_MASK) >> 4;
+  uint8_t compressionType = data[7] & COMPRESSION_MASK;
   if (version != PROTOCOL_VERSION) {
     return;
   }
@@ -93,6 +96,14 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
 
   if (universe != universeId) {
     return;
+  }
+
+  if (!hasLastSessionId || sessionId != lastSessionId) {
+    lastSessionId = sessionId;
+    hasLastSessionId = true;
+    hasLastSequence = false;
+    lastSequence = 0;
+    memset(dmxBuffer, 0, sizeof(dmxBuffer));
   }
 
   if (offset >= DMX_UNIVERSE_SIZE) {

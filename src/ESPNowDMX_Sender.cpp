@@ -18,6 +18,8 @@
 
 #include "ESPNowDMX_Sender.h"
 
+#include <esp_system.h>
+
 namespace {
 // Process-wide send statistics, written from the ESP-NOW send callback
 // (which fires on a Wi-Fi internal task) and read from user code on the
@@ -38,17 +40,26 @@ ESPNowDMX_Sender::SendStats ESPNowDMX_Sender::getSendStats() {
 }
 
 ESPNowDMX_Sender::ESPNowDMX_Sender()
-  : seqNumber(0),
+  : sessionId(0),
+    seqNumber(0),
     lastSendTime(0),
     lastFullSendTime(0),
     fullRefreshIntervalMs(200),
     espNowInitialized(false),
+    forceFullRefreshOnNextLoop(true),
     universeId(0) {
   memset(currentUniverse, 0, DMX_UNIVERSE_SIZE);
   memset(prevUniverse, 0, DMX_UNIVERSE_SIZE);
 }
 
 bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
+  sessionId = static_cast<uint8_t>(esp_random());
+  seqNumber = 0;
+  lastSendTime = 0;
+  lastFullSendTime = 0;
+  forceFullRefreshOnNextLoop = true;
+  memset(prevUniverse, 0, DMX_UNIVERSE_SIZE);
+
   if (registerInternalEspNow) {
     WiFi.mode(WIFI_STA);
   }
@@ -56,9 +67,14 @@ bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
     if (esp_now_init() != ESP_OK) {
       return false;
     }
-    esp_now_register_send_cb(ESPNowDMX_Sender::onDataSent);
     espNowInitialized = true;
   }
+
+  // Register the send callback even when another component (for example
+  // MeshClock) owns ESP-NOW initialization. Without this, the sender's
+  // health counters never update in shared-stack mode, so DMX sends can
+  // fail silently while clock packets continue to flow.
+  esp_now_register_send_cb(ESPNowDMX_Sender::onDataSent);
 
   esp_now_peer_info_t peer = {};
   memset(peer.peer_addr, 0xFF, 6);
@@ -110,8 +126,9 @@ void ESPNowDMX_Sender::loop() {
   // streaming changes (e.g. continuous CC automation from a DAW). Without
   // this the idle-resend path below never fires and slaves stay desynced
   // until everything goes quiet.
-  bool forceFull = fullRefreshIntervalMs > 0 &&
-                   (now - lastFullSendTime) >= fullRefreshIntervalMs;
+  bool forceFull = forceFullRefreshOnNextLoop ||
+                   (fullRefreshIntervalMs > 0 &&
+                    (now - lastFullSendTime) >= fullRefreshIntervalMs);
 
   if (forceFull) {
     // Skip the rapidInterval coalescing guard here: the full-refresh
@@ -122,6 +139,7 @@ void ESPNowDMX_Sender::loop() {
     sendRange(0, DMX_UNIVERSE_SIZE);
     lastSendTime = now;
     lastFullSendTime = now;
+    forceFullRefreshOnNextLoop = false;
     return;
   }
 
@@ -163,14 +181,15 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
 
   packet[0] = PACKET_TYPE_DATA_CHUNK;
   packet[1] = universeId;
-  packet[2] = (seqNumber >> 8) & 0xFF;
-  packet[3] = seqNumber & 0xFF;
-  packet[4] = (offset >> 8) & 0xFF;
-  packet[5] = offset & 0xFF;
+  packet[2] = sessionId;
+  packet[3] = (seqNumber >> 8) & 0xFF;
+  packet[4] = seqNumber & 0xFF;
+  packet[5] = (offset >> 8) & 0xFF;
+  packet[6] = offset & 0xFF;
 
   size_t payloadSize = length;
 
-  // Byte 6 packs PROTOCOL_VERSION in the high nibble and the
+  // Byte 7 packs PROTOCOL_VERSION in the high nibble and the
   // compression flag in the low nibble. Receivers running a
   // different PROTOCOL_VERSION will read an unknown low nibble
   // (since the version bits look like an "unknown compression
@@ -181,17 +200,17 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   // Try heatshrink compression when explicitly enabled
   size_t compressedSize = compressData(currentUniverse + offset, length, compBuffer, sizeof(compBuffer));
   if (compressedSize > 0 && compressedSize < length) {
-    packet[6] = versionBits | (COMPRESSION_HEATSHRINK & COMPRESSION_MASK);
+    packet[7] = versionBits | (COMPRESSION_HEATSHRINK & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, compBuffer, compressedSize);
     payloadSize = compressedSize;
   } else {
-    packet[6] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
+    packet[7] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
     payloadSize = length;
   }
 #else
   (void)compBuffer;
-  packet[6] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
+  packet[7] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
   memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
 #endif
 
@@ -205,7 +224,7 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
     lastLog = nowMs;
     ESPNOW_DMX_LOG("[TX] seq=%u offset=%u len=%u comp=%s err=%d", seqNumber, offset,
                    payloadSize,
-                   (packet[6] & COMPRESSION_MASK) == COMPRESSION_HEATSHRINK ? "HS" : "RAW",
+                   (packet[7] & COMPRESSION_MASK) == COMPRESSION_HEATSHRINK ? "HS" : "RAW",
                    err);
   }
 #endif

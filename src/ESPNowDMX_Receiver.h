@@ -32,7 +32,9 @@ public:
 
 private:
   uint8_t dmxBuffer[DMX_UNIVERSE_SIZE];
+  uint8_t lastSessionId;
   uint16_t lastSequence;
+  bool hasLastSessionId;
   bool hasLastSequence;
   DMXReceiveCallback userCallback;
   bool espNowInitialized;
