@@ -20,10 +20,12 @@ void setup() {
   receiver.begin();  // true by default = internal ESP-NOW init
   receiver.setDMXReceiveCallback(dmxCallback);
 
-  // Sender pairing is on by default: the first ~10s after the first DMX
-  // packet arrives are spent locking onto whichever sender has the
-  // strongest signal, so dmxCallback() won't fire until that completes.
-  // See README.md ("Sender Pairing") to tune or disable it.
+  // Sender pairing is off by default. Uncomment to opt in: the first
+  // ~10s after the first DMX packet arrives are then spent locking onto
+  // whichever sender has the strongest signal, so dmxCallback() won't
+  // fire until that completes. See README.md ("Sender Pairing") for
+  // getPairedMac()/setPairingWindow()/etc.
+  // receiver.setPairingEnabled(true);
 }
 
 void loop() {
