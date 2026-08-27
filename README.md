@@ -10,6 +10,7 @@ ESPNowDMX is a library for ESP32 devices to transmit and receive DMX lighting co
 - Chunked packets with sequence and offset indexing
 - Sequence number wrap-around handling (16-bit counter)
 - **Heatshrink compression** with automatic raw fallback
+- Broadcast by default, or up to 16 unicast destination addresses
 - Flexible ESP-NOW integration (standalone or external)
 - Receiver callback with full universe DMX data
 - Error handling for ESP-NOW operations
@@ -88,6 +89,29 @@ void setup() {
 }
 ```
 
+### Unicast Mode
+By default the sender broadcasts to all ESP-NOW peers on the channel. To
+target specific receivers instead, register up to 16 unicast MAC addresses
+before (or after) `begin()`. Once at least one unicast peer is registered,
+every DMX packet is sent directly to each registered address instead of
+being broadcast:
+
+```cpp
+ESPNowDMX_Sender sender;
+
+uint8_t receiver1[6] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33};
+uint8_t receiver2[6] = {0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x44};
+
+void setup() {
+    sender.addUnicastPeer(receiver1);
+    sender.addUnicastPeer(receiver2);
+    sender.begin();
+}
+```
+
+Call `clearUnicastPeers()` to drop back to broadcasting. This also works
+through the `ESPNowDMX` wrapper (`dmx.addUnicastPeer(mac)`, etc.).
+
 ## API Reference
 
 ### ESPNowDMX_Sender
@@ -109,6 +133,23 @@ void setup() {
 
 **`void loop()`**
 - Call frequently in `loop()` to send adaptive updates
+
+**`bool addUnicastPeer(const uint8_t mac[6])`**
+- Register a unicast destination MAC address (up to 16)
+- Once one or more unicast peers are registered, DMX packets are sent to each of them instead of being broadcast
+- Safe to call before or after `begin()`
+- Returns `false` if the address is invalid, the list is full, or peer registration with ESP-NOW fails
+- Adding the same address twice is a no-op that returns `true`
+
+**`bool removeUnicastPeer(const uint8_t mac[6])`**
+- Remove a previously registered unicast peer
+- Returns `false` if the address was not registered
+
+**`void clearUnicastPeers()`**
+- Remove all unicast peers, reverting to broadcast sends
+
+**`uint8_t getUnicastPeerCount() const`**
+- Number of unicast peers currently registered (`0` means broadcasting)
 
 ### ESPNowDMX_Receiver
 

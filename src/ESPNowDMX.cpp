@@ -107,3 +107,23 @@ void ESPNowDMX::forwardPacket(const uint8_t* mac, const uint8_t* data, int len) 
     s_activeReceiver->handleIncoming(mac, data, len);
   }
 }
+
+bool ESPNowDMX::addUnicastPeer(const uint8_t mac[6]) {
+  if (_mode != ESPNOW_DMX_MODE_SENDER) return false;
+  return _sender.addUnicastPeer(mac);
+}
+
+bool ESPNowDMX::removeUnicastPeer(const uint8_t mac[6]) {
+  if (_mode != ESPNOW_DMX_MODE_SENDER) return false;
+  return _sender.removeUnicastPeer(mac);
+}
+
+void ESPNowDMX::clearUnicastPeers() {
+  if (_mode == ESPNOW_DMX_MODE_SENDER) {
+    _sender.clearUnicastPeers();
+  }
+}
+
+uint8_t ESPNowDMX::getUnicastPeerCount() const {
+  return _mode == ESPNOW_DMX_MODE_SENDER ? _sender.getUnicastPeerCount() : 0;
+}

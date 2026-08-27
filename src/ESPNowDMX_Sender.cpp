@@ -47,9 +47,12 @@ ESPNowDMX_Sender::ESPNowDMX_Sender()
     fullRefreshIntervalMs(200),
     espNowInitialized(false),
     forceFullRefreshOnNextLoop(true),
-    universeId(0) {
+    universeId(0),
+    unicastCount(0),
+    peersReady(false) {
   memset(currentUniverse, 0, DMX_UNIVERSE_SIZE);
   memset(prevUniverse, 0, DMX_UNIVERSE_SIZE);
+  memset(unicastAddrs, 0, sizeof(unicastAddrs));
 }
 
 bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
@@ -76,17 +79,87 @@ bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
   // fail silently while clock packets continue to flow.
   esp_now_register_send_cb(ESPNowDMX_Sender::onDataSent);
 
-  esp_now_peer_info_t peer = {};
-  memset(peer.peer_addr, 0xFF, 6);
-  peer.channel = 0;
-  peer.encrypt = false;
-  
-  esp_err_t result = esp_now_add_peer(&peer);
-  if (result != ESP_OK && result != ESP_ERR_ESPNOW_EXIST) {
+  if (!registerEspNowPeer(broadcastAddr)) {
     return false;
   }
 
+  // Re-register any unicast peers that were added before begin() was
+  // called (esp_now_add_peer only works once ESP-NOW is up).
+  for (uint8_t i = 0; i < unicastCount; i++) {
+    if (!registerEspNowPeer(unicastAddrs[i])) {
+      return false;
+    }
+  }
+
+  peersReady = true;
   return true;
+}
+
+bool ESPNowDMX_Sender::registerEspNowPeer(const uint8_t mac[6]) {
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, mac, 6);
+  peer.channel = 0;
+  peer.encrypt = false;
+
+  esp_err_t result = esp_now_add_peer(&peer);
+  return result == ESP_OK || result == ESP_ERR_ESPNOW_EXIST;
+}
+
+bool ESPNowDMX_Sender::addUnicastPeer(const uint8_t mac[6]) {
+  if (mac == nullptr) return false;
+
+  bool allZero = true;
+  for (int i = 0; i < 6; i++) {
+    if (mac[i] != 0) { allZero = false; break; }
+  }
+  if (allZero) return false;
+
+  for (uint8_t i = 0; i < unicastCount; i++) {
+    if (memcmp(unicastAddrs[i], mac, 6) == 0) {
+      return true; // already registered
+    }
+  }
+
+  if (unicastCount >= MAX_UNICAST_PEERS) return false;
+
+  memcpy(unicastAddrs[unicastCount], mac, 6);
+  unicastCount++;
+
+  if (peersReady) {
+    if (!registerEspNowPeer(mac)) {
+      unicastCount--;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ESPNowDMX_Sender::removeUnicastPeer(const uint8_t mac[6]) {
+  if (mac == nullptr) return false;
+
+  for (uint8_t i = 0; i < unicastCount; i++) {
+    if (memcmp(unicastAddrs[i], mac, 6) == 0) {
+      if (peersReady) {
+        esp_now_del_peer(unicastAddrs[i]);
+      }
+      for (uint8_t j = i; j < unicastCount - 1; j++) {
+        memcpy(unicastAddrs[j], unicastAddrs[j + 1], 6);
+      }
+      unicastCount--;
+      return true;
+    }
+  }
+  return false;
+}
+
+void ESPNowDMX_Sender::clearUnicastPeers() {
+  if (peersReady) {
+    for (uint8_t i = 0; i < unicastCount; i++) {
+      esp_now_del_peer(unicastAddrs[i]);
+    }
+  }
+  unicastCount = 0;
 }
 
 void ESPNowDMX_Sender::setUniverse(const uint8_t* dmxData) {
@@ -215,7 +288,15 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
 #endif
 
   size_t sendLength = PACKET_HEADER_SIZE + payloadSize;
-  esp_err_t err = esp_now_send(broadcastAddr, packet, sendLength);
+  esp_err_t err = ESP_OK;
+  if (unicastCount > 0) {
+    for (uint8_t i = 0; i < unicastCount; i++) {
+      esp_err_t r = esp_now_send(unicastAddrs[i], packet, sendLength);
+      if (r != ESP_OK) err = r;
+    }
+  } else {
+    err = esp_now_send(broadcastAddr, packet, sendLength);
+  }
 
 #if ESPNOW_DMX_DEBUG
   static unsigned long lastLog = 0;

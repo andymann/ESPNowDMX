@@ -48,6 +48,30 @@ public:
   };
   static SendStats getSendStats();
 
+  // Maximum number of unicast peer addresses that can be registered.
+  static constexpr uint8_t MAX_UNICAST_PEERS = 16;
+
+  // Register a unicast destination MAC address (up to MAX_UNICAST_PEERS).
+  // Once one or more unicast peers are registered, DMX chunks are sent
+  // directly to each of them instead of being broadcast. Safe to call
+  // before or after begin() - addresses added before begin() are
+  // registered with ESP-NOW as soon as it becomes available.
+  // Returns false if the address is invalid/all-zero, the list is
+  // already full, or (when ESP-NOW is already up) esp_now_add_peer fails.
+  // Adding the same address twice is a no-op that returns true.
+  bool addUnicastPeer(const uint8_t mac[6]);
+
+  // Remove a previously registered unicast peer. Returns false if the
+  // address was not registered.
+  bool removeUnicastPeer(const uint8_t mac[6]);
+
+  // Remove all unicast peers. Once the list is empty, sends fall back
+  // to broadcasting again.
+  void clearUnicastPeers();
+
+  // Number of unicast peers currently registered (0 = broadcasting).
+  uint8_t getUnicastPeerCount() const { return unicastCount; }
+
 private:
   uint8_t currentUniverse[DMX_UNIVERSE_SIZE];
   uint8_t prevUniverse[DMX_UNIVERSE_SIZE];
@@ -61,6 +85,15 @@ private:
   uint8_t universeId;
   uint8_t broadcastAddr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+  // Unicast peers. When unicastCount > 0, sendChunk() targets these
+  // addresses instead of broadcastAddr.
+  uint8_t unicastAddrs[MAX_UNICAST_PEERS][6];
+  uint8_t unicastCount;
+  // True once begin() has successfully brought ESP-NOW up, i.e. once
+  // esp_now_add_peer() calls are safe to issue immediately.
+  bool peersReady;
+
+  bool registerEspNowPeer(const uint8_t mac[6]);
   void sendChunk(uint16_t offset, uint16_t length);
   void sendRange(uint16_t offset, uint16_t length);
 
