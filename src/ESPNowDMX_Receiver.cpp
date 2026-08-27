@@ -21,7 +21,7 @@
 ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
-  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0) {
+  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
   instance = this;
 }
@@ -31,6 +31,7 @@ bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   hasLastSequence = false;
   lastSessionId = 0;
   lastSequence = 0;
+  lastRssi = RSSI_UNKNOWN;
   if (registerInternalEspNow) {
     WiFi.mode(WIFI_STA);
   }
@@ -63,7 +64,7 @@ void ESPNowDMX_Receiver::setUniverseId(uint8_t universe) {
   universeId = universe;
 }
 
-bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, int len) {
+bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi) {
   if (len < PACKET_HEADER_SIZE) return false;
   if (data[0] != PACKET_TYPE_DATA_CHUNK) return false;
 #if ESPNOW_DMX_DEBUG
@@ -71,14 +72,14 @@ bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, 
   unsigned long nowMs = millis();
   if (nowMs - lastHeaderLog >= 1000) {
     lastHeaderLog = nowMs;
-    ESPNOW_DMX_LOG("[RX] raw len=%d", len);
+    ESPNOW_DMX_LOG("[RX] raw len=%d rssi=%d", len, rssi);
   }
 #endif
-  processPacket(data, len);
+  processPacket(data, len, rssi);
   return true;
 }
 
-void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
+void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len, int8_t rssi) {
   uint8_t universe = data[1];
   uint8_t sessionId = data[2];
   uint16_t seq = (data[3] << 8) | data[4];
@@ -122,6 +123,7 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
     hasLastSequence = true;
   }
   lastSequence = seq;
+  lastRssi = rssi;
 
   // Decompress or copy raw data based on compression flag
   size_t decompressedLen = 0;
@@ -173,8 +175,9 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len) {
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void ESPNowDMX_Receiver::onDataReceived(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   const uint8_t* src = (info && info->src_addr) ? info->src_addr : nullptr;
+  int8_t rssi = (info && info->rx_ctrl) ? static_cast<int8_t>(info->rx_ctrl->rssi) : RSSI_UNKNOWN;
   if (instance) {
-    instance->handleReceive(src, data, len);
+    instance->handleReceive(src, data, len, rssi);
   }
 }
 #else

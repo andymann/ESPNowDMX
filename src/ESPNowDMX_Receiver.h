@@ -28,7 +28,16 @@ public:
 
   void setDMXReceiveCallback(DMXReceiveCallback cb);
   void setUniverseId(uint8_t universe);
-  bool handleReceive(const uint8_t *mac, const uint8_t *data, int len);
+
+  // rssi: signal strength (dBm) of this packet, if known. Defaults to
+  // RSSI_UNKNOWN for callers that can't recover it (e.g. external
+  // ESP-NOW integrations on an ESP-IDF version that doesn't expose it).
+  bool handleReceive(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi = RSSI_UNKNOWN);
+
+  // RSSI (dBm, closer to 0 = stronger) of the most recently accepted DMX
+  // packet for the current universe. RSSI_UNKNOWN if nothing has been
+  // received yet, or if it wasn't supplied to handleReceive().
+  int8_t getLastRssi() const { return lastRssi; }
 
 private:
   uint8_t dmxBuffer[DMX_UNIVERSE_SIZE];
@@ -39,8 +48,9 @@ private:
   DMXReceiveCallback userCallback;
   bool espNowInitialized;
   uint8_t universeId;
+  int8_t lastRssi;
 
-  void processPacket(const uint8_t *data, int len);
+  void processPacket(const uint8_t *data, int len, int8_t rssi);
 
   static ESPNowDMX_Receiver* instance;
 

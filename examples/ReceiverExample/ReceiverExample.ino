@@ -4,8 +4,11 @@
 ESPNowDMX_Receiver receiver;
 
 void dmxCallback(uint8_t universe, const uint8_t* data) {
-  Serial.printf("Received DMX universe %d - first 8 values: %d %d %d %d %d %d %d %d\n",
-                universe, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+  // getLastRssi() reports the signal strength (dBm) of the packet that
+  // carried this frame; RSSI_UNKNOWN if the platform can't supply it.
+  int8_t rssi = receiver.getLastRssi();
+  Serial.printf("Received DMX universe %d (rssi=%d dBm) - first 8 values: %d %d %d %d %d %d %d %d\n",
+                universe, rssi, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
 }
 
 void onEspNowReceive(const uint8_t *mac, const uint8_t *data, int len) {

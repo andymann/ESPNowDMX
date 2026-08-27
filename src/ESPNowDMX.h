@@ -26,8 +26,13 @@ public:
 	void setReceiveCallback(DMXReceiveCallback cb);
 	void setDMXReceiveCallback(DMXReceiveCallback cb);
 
-	bool handleIncoming(const uint8_t* mac, const uint8_t* data, int len);
-	static void forwardPacket(const uint8_t* mac, const uint8_t* data, int len);
+	bool handleIncoming(const uint8_t* mac, const uint8_t* data, int len, int8_t rssi = RSSI_UNKNOWN);
+	static void forwardPacket(const uint8_t* mac, const uint8_t* data, int len, int8_t rssi = RSSI_UNKNOWN);
+
+	// Receiver mode only: RSSI (dBm) of the most recently received DMX
+	// packet for the current universe. RSSI_UNKNOWN in sender mode or if
+	// nothing has been received yet.
+	int8_t getLastRssi() const;
 
 	// Unicast peer management (sender mode only). Once one or more
 	// unicast peers are registered, DMX is sent directly to them
