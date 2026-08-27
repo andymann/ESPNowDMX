@@ -29,6 +29,14 @@ public:
 	bool handleIncoming(const uint8_t* mac, const uint8_t* data, int len);
 	static void forwardPacket(const uint8_t* mac, const uint8_t* data, int len);
 
+	// Unicast peer management (sender mode only). Once one or more
+	// unicast peers are registered, DMX is sent directly to them
+	// instead of being broadcast. No-ops (return false) in receiver mode.
+	bool addUnicastPeer(const uint8_t mac[6]);
+	bool removeUnicastPeer(const uint8_t mac[6]);
+	void clearUnicastPeers();
+	uint8_t getUnicastPeerCount() const;
+
 private:
 	ESPNowDMXMode _mode;
 	bool _initialized;
