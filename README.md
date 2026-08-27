@@ -14,6 +14,7 @@ ESPNowDMX is a library for ESP32 devices to transmit and receive DMX lighting co
 - Flexible ESP-NOW integration (standalone or external)
 - Receiver callback with full universe DMX data
 - Per-packet RSSI (signal strength) reporting on the receiver
+- Automatic sender pairing: locks onto the strongest-signal sender heard during a boot-time window, ignoring others
 - Error handling for ESP-NOW operations
 
 ## Installation
@@ -141,6 +142,37 @@ void onEspNowReceive(const esp_now_recv_info_t *info, const uint8_t *data, int l
 
 Omit the last argument and it defaults to `RSSI_UNKNOWN`.
 
+### Sender Pairing
+Plain broadcast has no sender authentication - any device broadcasting the
+right universe gets accepted, which is a problem if a second, unrelated
+sender (interference, a stray test rig) ever shows up on the same universe.
+The receiver handles this with a lock-on step: on the first DMX packet it
+sees after booting, a 10-second pairing window opens. Every DMX packet
+received during that window is a candidate regardless of source; whichever
+source MAC had the strongest RSSI by the time the window elapses becomes the
+paired sender, and packets from any other MAC are ignored from then on.
+
+This is enabled by default - no code required. To inspect or control it:
+
+```cpp
+if (receiver.isPaired()) {
+    uint8_t mac[6];
+    receiver.getPairedMac(mac);
+    Serial.printf("paired to %02X:%02X:%02X:%02X:%02X:%02X
+",
+                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+receiver.setPairingWindow(5000);   // shorter window, e.g. for quicker bring-up
+receiver.resetPairing();           // forget the current sender and re-arm
+receiver.setPairingEnabled(false); // restore old "accept any sender" behavior
+```
+
+Since the window is evaluated on packet arrival rather than a background
+timer, it actually closes on the first packet received at or after the
+10-second mark, not necessarily exactly on it - fine for lighting control,
+where that's imperceptible.
+
 ## API Reference
 
 ### ESPNowDMX_Sender
@@ -200,6 +232,27 @@ Omit the last argument and it defaults to `RSSI_UNKNOWN`.
 **`int8_t getLastRssi() const`**
 - RSSI (dBm) of the most recently accepted DMX packet for the current universe
 - `RSSI_UNKNOWN` if nothing has been received yet, or the caller didn't supply it to `handleReceive()`
+
+**`void setPairingEnabled(bool enabled)`**
+- Turn sender pairing on/off (default: on)
+- Disabling clears any current pairing/in-progress window, reverting to accepting any sender for the configured universe
+
+**`bool isPairingEnabled() const`**
+- Whether pairing is currently enabled
+
+**`void setPairingWindow(unsigned long windowMs)`**
+- Length of the pairing window in ms (default `10000`)
+- Changing this while a window is already open takes effect on that window's next packet
+
+**`bool isPaired() const`**
+- `true` once a sender has been locked in; always `false` while pairing is disabled or a window is still open
+
+**`bool getPairedMac(uint8_t mac[6]) const`**
+- Copies the paired sender's MAC into `mac`
+- Returns `false` (leaving `mac` untouched) if not yet paired
+
+**`void resetPairing()`**
+- Forgets the current pairing and re-arms: the next DMX packet opens a new pairing window, as if just booted
 
 ## Examples
 

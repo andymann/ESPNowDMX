@@ -118,6 +118,36 @@ int8_t ESPNowDMX::getLastRssi() const {
   return _mode == ESPNOW_DMX_MODE_RECEIVER ? _receiver.getLastRssi() : RSSI_UNKNOWN;
 }
 
+void ESPNowDMX::setPairingEnabled(bool enabled) {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.setPairingEnabled(enabled);
+  }
+}
+
+bool ESPNowDMX::isPairingEnabled() const {
+  return _mode == ESPNOW_DMX_MODE_RECEIVER ? _receiver.isPairingEnabled() : false;
+}
+
+void ESPNowDMX::setPairingWindow(unsigned long windowMs) {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.setPairingWindow(windowMs);
+  }
+}
+
+bool ESPNowDMX::isPaired() const {
+  return _mode == ESPNOW_DMX_MODE_RECEIVER ? _receiver.isPaired() : false;
+}
+
+bool ESPNowDMX::getPairedMac(uint8_t mac[6]) const {
+  return _mode == ESPNOW_DMX_MODE_RECEIVER ? _receiver.getPairedMac(mac) : false;
+}
+
+void ESPNowDMX::resetPairing() {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.resetPairing();
+  }
+}
+
 bool ESPNowDMX::addUnicastPeer(const uint8_t mac[6]) {
   if (_mode != ESPNOW_DMX_MODE_SENDER) return false;
   return _sender.addUnicastPeer(mac);
