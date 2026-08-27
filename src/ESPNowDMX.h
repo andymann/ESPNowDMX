@@ -38,6 +38,15 @@ public:
 	// nothing has been received yet.
 	int8_t getLastRssi() const;
 
+	// Sender pairing (receiver mode only; no-ops/false otherwise). See
+	// ESPNowDMX_Receiver for details.
+	void setPairingEnabled(bool enabled);
+	bool isPairingEnabled() const;
+	void setPairingWindow(unsigned long windowMs);
+	bool isPaired() const;
+	bool getPairedMac(uint8_t mac[6]) const;
+	void resetPairing();
+
 	// Unicast peer management (sender mode only). Once one or more
 	// unicast peers are registered, DMX is sent directly to them
 	// instead of being broadcast. No-ops (return false) in receiver mode.

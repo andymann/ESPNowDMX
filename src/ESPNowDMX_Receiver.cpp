@@ -21,8 +21,11 @@
 ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
-  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN) {
+  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN),
+    pairingEnabled(true), pairingActive(false), pairingLocked(false), pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
+  memset(pairingBestMac, 0, 6);
+  memset(pairedMac, 0, 6);
   instance = this;
 }
 
@@ -32,6 +35,7 @@ bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   lastSessionId = 0;
   lastSequence = 0;
   lastRssi = RSSI_UNKNOWN;
+  resetPairing();
   if (registerInternalEspNow) {
     WiFi.mode(WIFI_STA);
   }
@@ -75,11 +79,63 @@ bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, 
     ESPNOW_DMX_LOG("[RX] raw len=%d rssi=%d", len, rssi);
   }
 #endif
-  processPacket(data, len, rssi);
+  processPacket(mac, data, len, rssi);
   return true;
 }
 
-void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len, int8_t rssi) {
+void ESPNowDMX_Receiver::setPairingEnabled(bool enabled) {
+  pairingEnabled = enabled;
+  if (!enabled) {
+    // Nothing left to gate on - drop any in-progress window/lock so a
+    // stale pairing doesn't keep silently filtering senders.
+    resetPairing();
+  }
+}
+
+bool ESPNowDMX_Receiver::getPairedMac(uint8_t mac[6]) const {
+  if (!pairingLocked) return false;
+  memcpy(mac, pairedMac, 6);
+  return true;
+}
+
+void ESPNowDMX_Receiver::resetPairing() {
+  pairingActive = false;
+  pairingLocked = false;
+  pairingStartMs = 0;
+  pairingBestRssi = RSSI_UNKNOWN;
+  memset(pairingBestMac, 0, 6);
+  memset(pairedMac, 0, 6);
+}
+
+void ESPNowDMX_Receiver::updatePairing(const uint8_t *mac, int8_t rssi) {
+  if (mac == nullptr) return; // can't attribute this packet to a sender
+
+  unsigned long now = millis();
+
+  if (!pairingActive) {
+    // First DMX packet for our universe since boot/reset: open the window.
+    pairingActive = true;
+    pairingStartMs = now;
+    pairingBestRssi = rssi;
+    memcpy(pairingBestMac, mac, 6);
+  } else if (rssi > pairingBestRssi) {
+    pairingBestRssi = rssi;
+    memcpy(pairingBestMac, mac, 6);
+  }
+
+  if (now - pairingStartMs >= pairingWindowMs) {
+    memcpy(pairedMac, pairingBestMac, 6);
+    pairingLocked = true;
+    pairingActive = false;
+#if ESPNOW_DMX_DEBUG
+    ESPNOW_DMX_LOG("[Pairing] locked to %02X:%02X:%02X:%02X:%02X:%02X (rssi=%d)",
+                   pairedMac[0], pairedMac[1], pairedMac[2], pairedMac[3], pairedMac[4], pairedMac[5],
+                   pairingBestRssi);
+#endif
+  }
+}
+
+void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi) {
   uint8_t universe = data[1];
   uint8_t sessionId = data[2];
   uint16_t seq = (data[3] << 8) | data[4];
@@ -97,6 +153,18 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *data, int len, int8_t rssi
 
   if (universe != universeId) {
     return;
+  }
+
+  if (pairingEnabled) {
+    if (!pairingLocked) {
+      updatePairing(mac, rssi);
+      if (!pairingLocked) {
+        return; // still pairing - don't touch session/seq/buffer state yet
+      }
+    }
+    if (mac == nullptr || memcmp(mac, pairedMac, 6) != 0) {
+      return; // packet from an unpaired sender
+    }
   }
 
   if (!hasLastSessionId || sessionId != lastSessionId) {
