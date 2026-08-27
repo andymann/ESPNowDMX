@@ -22,7 +22,7 @@ ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
   : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN),
-    pairingEnabled(true), pairingActive(false), pairingLocked(false), pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
+    pairingEnabled(false), pairingActive(false), pairingLocked(false), pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
   memset(pairingBestMac, 0, 6);
   memset(pairedMac, 0, 6);
