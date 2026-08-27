@@ -65,6 +65,12 @@ void ESPNowDMX::setChannel(uint16_t address, uint8_t value) {
   }
 }
 
+void ESPNowDMX::setFullRefreshInterval(unsigned long intervalMs) {
+  if (_mode == ESPNOW_DMX_MODE_SENDER) {
+    _sender.setFullRefreshInterval(intervalMs);
+  }
+}
+
 void ESPNowDMX::sendDMXFrame(const uint8_t* data, size_t length) {
   if (!_initialized || _mode != ESPNOW_DMX_MODE_SENDER || data == nullptr) {
     return;

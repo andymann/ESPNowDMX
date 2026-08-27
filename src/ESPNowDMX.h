@@ -23,6 +23,10 @@ public:
 	void setChannel(uint16_t address, uint8_t value);
 	void sendDMXFrame(const uint8_t* data, size_t length);
 
+	// Sender mode only; no-op in receiver mode. See ESPNowDMX_Sender for
+	// details - 0 disables periodic full refresh, default 200 ms.
+	void setFullRefreshInterval(unsigned long intervalMs);
+
 	void setReceiveCallback(DMXReceiveCallback cb);
 	void setDMXReceiveCallback(DMXReceiveCallback cb);
 

@@ -51,6 +51,9 @@ void loop() {
 }
 ```
 
+The wrapper also exposes `setFullRefreshInterval()` (sender mode only) - see
+`ESPNowDMX_Sender` below for what it does.
+
 ### Standalone Mode (Default)
 The library handles ESP-NOW initialization internally:
 
