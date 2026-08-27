@@ -14,7 +14,7 @@ ESPNowDMX is a library for ESP32 devices to transmit and receive DMX lighting co
 - Flexible ESP-NOW integration (standalone or external)
 - Receiver callback with full universe DMX data
 - Per-packet RSSI (signal strength) reporting on the receiver
-- Automatic sender pairing: locks onto the strongest-signal sender heard during a boot-time window, ignoring others
+- Optional sender pairing: locks onto the strongest-signal sender heard during a boot-time window, ignoring others
 - Error handling for ESP-NOW operations
 
 ## Installation
@@ -152,9 +152,11 @@ received during that window is a candidate regardless of source; whichever
 source MAC had the strongest RSSI by the time the window elapses becomes the
 paired sender, and packets from any other MAC are ignored from then on.
 
-This is enabled by default - no code required. To inspect or control it:
+This is **disabled by default** - call `setPairingEnabled(true)` to opt in:
 
 ```cpp
+receiver.setPairingEnabled(true);  // opt in to sender pairing
+
 if (receiver.isPaired()) {
     uint8_t mac[6];
     receiver.getPairedMac(mac);
@@ -165,7 +167,7 @@ if (receiver.isPaired()) {
 
 receiver.setPairingWindow(5000);   // shorter window, e.g. for quicker bring-up
 receiver.resetPairing();           // forget the current sender and re-arm
-receiver.setPairingEnabled(false); // restore old "accept any sender" behavior
+receiver.setPairingEnabled(false); // back to accepting any sender
 ```
 
 Since the window is evaluated on packet arrival rather than a background
@@ -234,7 +236,7 @@ where that's imperceptible.
 - `RSSI_UNKNOWN` if nothing has been received yet, or the caller didn't supply it to `handleReceive()`
 
 **`void setPairingEnabled(bool enabled)`**
-- Turn sender pairing on/off (default: on)
+- Turn sender pairing on/off (default: off)
 - Disabling clears any current pairing/in-progress window, reverting to accepting any sender for the configured universe
 
 **`bool isPairingEnabled() const`**
