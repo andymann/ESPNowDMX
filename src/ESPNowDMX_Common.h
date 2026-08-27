@@ -81,6 +81,12 @@ using DMXUniverseBuffer = uint8_t[DMX_UNIVERSE_SIZE];
 // User callback type for receiver to receive full buffer
 using DMXReceiveCallback = void (*)(uint8_t universe, const uint8_t *dmxData);
 
+// Sentinel RSSI (dBm) value meaning "not available" - real Wi-Fi RSSI
+// readings fall well within a couple hundred of 0, so this is unambiguous.
+// Returned/passed when the underlying ESP-IDF version or an external
+// ESP-NOW integration can't supply per-packet signal strength.
+constexpr int8_t RSSI_UNKNOWN = -128;
+
 // Feature toggles (override via build_flags)
 #ifndef ESPNOW_DMX_ENABLE_COMPRESSION
 #define ESPNOW_DMX_ENABLE_COMPRESSION 1

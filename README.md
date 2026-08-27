@@ -13,6 +13,7 @@ ESPNowDMX is a library for ESP32 devices to transmit and receive DMX lighting co
 - Broadcast by default, or up to 16 unicast destination addresses
 - Flexible ESP-NOW integration (standalone or external)
 - Receiver callback with full universe DMX data
+- Per-packet RSSI (signal strength) reporting on the receiver
 - Error handling for ESP-NOW operations
 
 ## Installation
@@ -112,6 +113,31 @@ void setup() {
 Call `clearUnicastPeers()` to drop back to broadcasting. This also works
 through the `ESPNowDMX` wrapper (`dmx.addUnicastPeer(mac)`, etc.).
 
+### Signal Strength (RSSI)
+The receiver tracks the RSSI (dBm) of the most recently accepted DMX packet
+for its universe, so you can evaluate link quality:
+
+```cpp
+void dmxCallback(uint8_t universe, const uint8_t* data) {
+    int8_t rssi = receiver.getLastRssi();   // e.g. -42 dBm; closer to 0 is stronger
+    Serial.printf("universe %d, rssi %d dBm\n", universe, rssi);
+}
+```
+
+`getLastRssi()` returns `RSSI_UNKNOWN` (defined in `ESPNowDMX_Common.h`) before
+anything has been received. RSSI is captured automatically in standalone mode
+(`begin(true)`, the default). In external ESP-NOW mode, pass it through
+yourself if your platform's receive callback supplies it - on ESP-IDF 5+ that's
+`info->rx_ctrl->rssi`:
+
+```cpp
+void onEspNowReceive(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+    receiver.handleReceive(info->src_addr, data, len, info->rx_ctrl->rssi);
+}
+```
+
+Omit the last argument and it defaults to `RSSI_UNKNOWN`.
+
 ## API Reference
 
 ### ESPNowDMX_Sender
@@ -162,10 +188,15 @@ through the `ESPNowDMX` wrapper (`dmx.addUnicastPeer(mac)`, etc.).
 - Register callback for received DMX data
 - Callback signature: `void callback(uint8_t universe, const uint8_t* dmxData)`
 
-**`bool handleReceive(const uint8_t *mac, const uint8_t *data, int len)`**
+**`bool handleReceive(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi = RSSI_UNKNOWN)`**
 - Process incoming ESP-NOW packet
+- `rssi`: signal strength (dBm) of this packet, if your platform's callback supplies it; defaults to `RSSI_UNKNOWN`
 - Returns `true` if packet was a DMX packet, `false` otherwise
 - Use this when managing ESP-NOW externally
+
+**`int8_t getLastRssi() const`**
+- RSSI (dBm) of the most recently accepted DMX packet for the current universe
+- `RSSI_UNKNOWN` if nothing has been received yet, or the caller didn't supply it to `handleReceive()`
 
 ## Examples
 
