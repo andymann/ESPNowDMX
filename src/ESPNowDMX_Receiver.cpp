@@ -21,7 +21,7 @@
 ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
-  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN),
+  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN), lastFrameId(0xFF),
     pairingEnabled(false), pairingActive(false), pairingLocked(false), pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
   memset(pairingBestMac, 0, 6);
@@ -35,6 +35,7 @@ bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   lastSessionId = 0;
   lastSequence = 0;
   lastRssi = RSSI_UNKNOWN;
+  lastFrameId = 0xFF;
   resetPairing();
   if (registerInternalEspNow) {
     WiFi.mode(WIFI_STA);
@@ -136,15 +137,20 @@ void ESPNowDMX_Receiver::updatePairing(const uint8_t *mac, int8_t rssi) {
 }
 
 void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi) {
+  // Header layout (v0x03, 9 bytes):
+  //   [0] packet type   [1] universe   [2] session   [3] frameId
+  //   [4-5] seq (BE)    [6-7] offset (BE)
+  //   [8] protocol version (high nibble) | compression (low nibble)
   uint8_t universe = data[1];
   uint8_t sessionId = data[2];
-  uint16_t seq = (data[3] << 8) | data[4];
-  uint16_t offset = (data[5] << 8) | data[6];
-  // Byte 7: high nibble = wire-format version, low nibble = compression.
+  uint8_t recvFrameId = data[3];
+  uint16_t seq = ((uint16_t)data[4] << 8) | data[5];
+  uint16_t offset = ((uint16_t)data[6] << 8) | data[7];
+  // Byte 8: high nibble = wire-format version, low nibble = compression.
   // Mismatched versions are dropped: a peer running a different
   // PROTOCOL_VERSION would have a layout this build can't safely parse.
-  uint8_t version = (data[7] & PROTOCOL_VERSION_MASK) >> 4;
-  uint8_t compressionType = data[7] & COMPRESSION_MASK;
+  uint8_t version = (data[8] & PROTOCOL_VERSION_MASK) >> 4;
+  uint8_t compressionType = data[8] & COMPRESSION_MASK;
   if (version != PROTOCOL_VERSION) {
     return;
   }
@@ -192,6 +198,7 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
   }
   lastSequence = seq;
   lastRssi = rssi;
+  lastFrameId = recvFrameId;
 
   // Decompress or copy raw data based on compression flag
   size_t decompressedLen = 0;
