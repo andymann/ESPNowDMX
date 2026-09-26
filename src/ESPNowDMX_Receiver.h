@@ -39,11 +39,6 @@ public:
   // received yet, or if it wasn't supplied to handleReceive().
   int8_t getLastRssi() const { return lastRssi; }
 
-  // frameId of the most recently accepted DMX packet for the current universe.
-  // Relay sketches can call this immediately after handleReceive() returns true
-  // to obtain the frame counter for deduplication without re-parsing raw bytes.
-  uint8_t getLastFrameId() const { return lastFrameId; }
-
   // --- Sender pairing ---
   //
   // Plain broadcast has no sender authentication: any device broadcasting
@@ -92,7 +87,6 @@ private:
   bool espNowInitialized;
   uint8_t universeId;
   int8_t lastRssi;
-  uint8_t lastFrameId;   // frameId from the most recently accepted packet
 
   bool pairingEnabled;
   bool pairingActive;

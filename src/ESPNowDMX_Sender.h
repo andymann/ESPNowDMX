@@ -76,7 +76,6 @@ private:
   uint8_t currentUniverse[DMX_UNIVERSE_SIZE];
   uint8_t prevUniverse[DMX_UNIVERSE_SIZE];
   uint8_t sessionId;
-  uint8_t frameId;   // increments once per sendRange() call; all chunks of a frame share the same value
   uint16_t seqNumber;
   unsigned long lastSendTime;
   unsigned long lastFullSendTime;
