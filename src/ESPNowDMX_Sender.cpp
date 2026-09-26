@@ -41,7 +41,6 @@ ESPNowDMX_Sender::SendStats ESPNowDMX_Sender::getSendStats() {
 
 ESPNowDMX_Sender::ESPNowDMX_Sender()
   : sessionId(0),
-    frameId(0),
     seqNumber(0),
     lastSendTime(0),
     lastFullSendTime(0),
@@ -236,10 +235,6 @@ void ESPNowDMX_Sender::sendRange(uint16_t offset, uint16_t length) {
     length = DMX_UNIVERSE_SIZE - offset;
   }
 
-  // Advance the frame counter once per frame (all chunks of this sendRange share the same frameId).
-  // The uint8_t wraps automatically at 0xFF -> 0x00.
-  frameId++;
-
   uint16_t processed = 0;
   while (processed < length) {
     uint16_t remaining = length - processed;
@@ -257,28 +252,17 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   uint8_t packet[ESP_NOW_MAX_PAYLOAD];
   uint8_t compBuffer[ESP_NOW_MAX_PAYLOAD - PACKET_HEADER_SIZE];
 
-  // Header layout (v0x03, 9 bytes):
-  //   [0] packet type
-  //   [1] universe id
-  //   [2] session id
-  //   [3] frame id  (NEW: increments once per sendRange call, wraps 0xFF->0x00)
-  //   [4] seq high byte
-  //   [5] seq low byte
-  //   [6] offset high byte
-  //   [7] offset low byte
-  //   [8] protocol version (high nibble) | compression type (low nibble)
   packet[0] = PACKET_TYPE_DATA_CHUNK;
   packet[1] = universeId;
   packet[2] = sessionId;
-  packet[3] = frameId;
-  packet[4] = (seqNumber >> 8) & 0xFF;
-  packet[5] = seqNumber & 0xFF;
-  packet[6] = (offset >> 8) & 0xFF;
-  packet[7] = offset & 0xFF;
+  packet[3] = (seqNumber >> 8) & 0xFF;
+  packet[4] = seqNumber & 0xFF;
+  packet[5] = (offset >> 8) & 0xFF;
+  packet[6] = offset & 0xFF;
 
   size_t payloadSize = length;
 
-  // Byte 8 packs PROTOCOL_VERSION in the high nibble and the
+  // Byte 7 packs PROTOCOL_VERSION in the high nibble and the
   // compression flag in the low nibble. Receivers running a
   // different PROTOCOL_VERSION will read an unknown low nibble
   // (since the version bits look like an "unknown compression
@@ -289,17 +273,17 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   // Try heatshrink compression when explicitly enabled
   size_t compressedSize = compressData(currentUniverse + offset, length, compBuffer, sizeof(compBuffer));
   if (compressedSize > 0 && compressedSize < length) {
-    packet[8] = versionBits | (COMPRESSION_HEATSHRINK & COMPRESSION_MASK);
+    packet[7] = versionBits | (COMPRESSION_HEATSHRINK & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, compBuffer, compressedSize);
     payloadSize = compressedSize;
   } else {
-    packet[8] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
+    packet[7] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
     memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
     payloadSize = length;
   }
 #else
   (void)compBuffer;
-  packet[8] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
+  packet[7] = versionBits | (COMPRESSION_NONE & COMPRESSION_MASK);
   memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
 #endif
 
