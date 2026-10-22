@@ -38,6 +38,7 @@ public:
   // packet for the current universe. RSSI_UNKNOWN if nothing has been
   // received yet, or if it wasn't supplied to handleReceive().
   int8_t getLastRssi() const { return lastRssi; }
+  uint8_t getLastFrameId() const { return lastFrameId; }
 
   // --- Sender pairing ---
   //
@@ -77,6 +78,30 @@ public:
   // opens a new pairing window, as if the receiver had just booted.
   void resetPairing();
 
+  // --- Relay / range extension ---
+  //
+  // When relay is enabled the receiver re-broadcasts every accepted packet
+  // verbatim immediately after processing it. This lets a chain of receivers
+  // extend the ESP-NOW range without any changes to the sender sketch.
+  //
+  // Loop prevention: the existing per-chunk sequence-number deduplication
+  // already handles packets that bounce back -- a chunk whose (sessionId,
+  // seqNumber) pair was already processed is silently dropped.
+  //
+  // Callback deduplication: the frameId byte (header[8]) ensures the user
+  // callback fires only once per original sender frame even when redundant
+  // relay paths deliver the same frame through multiple routes.
+  //
+  // By default relay sends to the broadcast address (FF:FF:FF:FF:FF:FF).
+  // Call setRelayAddr() to restrict forwarding to a specific next-hop MAC.
+  void enableRelay(bool enable);
+  bool isRelayEnabled() const { return relayEnabled; }
+
+  // Set a unicast next-hop MAC for relay. By default relay broadcasts.
+  // Safe to call before or after begin().
+  void setRelayAddr(const uint8_t mac[6]);
+  void relayLoop();
+
 private:
   uint8_t dmxBuffer[DMX_UNIVERSE_SIZE];
   uint8_t lastSessionId;
@@ -87,6 +112,20 @@ private:
   bool espNowInitialized;
   uint8_t universeId;
   int8_t lastRssi;
+
+  // Frame-level deduplication: fires user callback only once per unique
+  // frameId within a session, even when relay delivers duplicate chunks.
+  uint8_t lastFrameId;
+  bool hasLastFrameId;
+
+  // Relay state
+  bool relayEnabled;
+  uint8_t relayAddr[6];      // destination for relayed packets (default: broadcast)
+  bool relayAddrPending;     // true if setRelayAddr() was called before begin()
+
+  void relayPacket(const uint8_t *data, int len);
+  uint8_t  relayPendingBuf[ESP_NOW_MAX_PAYLOAD];
+  volatile int relayPendingLen;
 
   bool pairingEnabled;
   bool pairingActive;

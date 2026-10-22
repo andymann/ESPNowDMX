@@ -24,7 +24,7 @@ namespace {
 // Process-wide send statistics, written from the ESP-NOW send callback
 // (which fires on a Wi-Fi internal task) and read from user code on the
 // main task. Single producer / single consumer, plain volatile is OK on
-// the 32-bit values; consecutiveFailures may race by ±1 but that's fine
+// the 32-bit values; consecutiveFailures may race by +/-1 but that's fine
 // for "should I restart the radio" logic.
 volatile uint32_t g_totalSent = 0;
 volatile uint32_t g_totalFailed = 0;
@@ -48,6 +48,7 @@ ESPNowDMX_Sender::ESPNowDMX_Sender()
     espNowInitialized(false),
     forceFullRefreshOnNextLoop(true),
     universeId(0),
+    frameId(0),
     unicastCount(0),
     peersReady(false) {
   memset(currentUniverse, 0, DMX_UNIVERSE_SIZE);
@@ -58,6 +59,7 @@ ESPNowDMX_Sender::ESPNowDMX_Sender()
 bool ESPNowDMX_Sender::begin(bool registerInternalEspNow) {
   sessionId = static_cast<uint8_t>(esp_random());
   seqNumber = 0;
+  frameId = 0;
   lastSendTime = 0;
   lastFullSendTime = 0;
   forceFullRefreshOnNextLoop = true;
@@ -207,7 +209,7 @@ void ESPNowDMX_Sender::loop() {
     // Skip the rapidInterval coalescing guard here: the full-refresh
     // period (fullRefreshIntervalMs, typically 200 ms) is the rate
     // limiter. Letting the rapid guard delay or cancel a scheduled full
-    // refresh breaks the ≤200 ms recovery guarantee under sustained
+    // refresh breaks the <=200 ms recovery guarantee under sustained
     // delta traffic (e.g. continuous CC automation from a DAW).
     sendRange(0, DMX_UNIVERSE_SIZE);
     lastSendTime = now;
@@ -234,6 +236,12 @@ void ESPNowDMX_Sender::sendRange(uint16_t offset, uint16_t length) {
   if (offset + length > DMX_UNIVERSE_SIZE) {
     length = DMX_UNIVERSE_SIZE - offset;
   }
+
+  // Increment frameId once per transmission event so every chunk in this
+  // sendRange() call carries the same frameId. Receivers use this to fire
+  // the user callback exactly once per original frame, even when redundant
+  // relay paths deliver duplicate or out-of-order chunks.
+  frameId++;
 
   uint16_t processed = 0;
   while (processed < length) {
@@ -264,9 +272,9 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
 
   // Byte 7 packs PROTOCOL_VERSION in the high nibble and the
   // compression flag in the low nibble. Receivers running a
-  // different PROTOCOL_VERSION will read an unknown low nibble
+  // different PROTOCOL_VERSION will read an unknown high nibble
   // (since the version bits look like an "unknown compression
-  // type" to them) and drop the packet — no garbled state.
+  // type" to them) and drop the packet -- no garbled state.
   const uint8_t versionBits = (PROTOCOL_VERSION << 4) & PROTOCOL_VERSION_MASK;
 
 #if ESPNOW_DMX_ENABLE_COMPRESSION
@@ -287,6 +295,9 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   memcpy(packet + PACKET_HEADER_SIZE, currentUniverse + offset, length);
 #endif
 
+  // Byte 8: frameId -- same value for all chunks in one sendRange() call.
+  packet[8] = frameId;
+
   size_t sendLength = PACKET_HEADER_SIZE + payloadSize;
   esp_err_t err = ESP_OK;
   if (unicastCount > 0) {
@@ -303,7 +314,7 @@ void ESPNowDMX_Sender::sendChunk(uint16_t offset, uint16_t length) {
   unsigned long nowMs = millis();
   if (nowMs - lastLog >= 500) {
     lastLog = nowMs;
-    ESPNOW_DMX_LOG("[TX] seq=%u offset=%u len=%u comp=%s err=%d", seqNumber, offset,
+    ESPNOW_DMX_LOG("[TX] seq=%u frameId=%u offset=%u len=%u comp=%s err=%d", seqNumber, frameId, offset,
                    payloadSize,
                    (packet[7] & COMPRESSION_MASK) == COMPRESSION_HEATSHRINK ? "HS" : "RAW",
                    err);

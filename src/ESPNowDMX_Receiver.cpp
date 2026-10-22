@@ -21,19 +21,26 @@
 ESPNowDMX_Receiver* ESPNowDMX_Receiver::instance = nullptr;
 
 ESPNowDMX_Receiver::ESPNowDMX_Receiver()
-  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false), userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN),
-    pairingEnabled(false), pairingActive(false), pairingLocked(false), pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
+  : lastSessionId(0), lastSequence(0), hasLastSessionId(false), hasLastSequence(false),
+    userCallback(nullptr), espNowInitialized(false), universeId(0), lastRssi(RSSI_UNKNOWN),
+    lastFrameId(0), hasLastFrameId(false),
+    relayEnabled(false), relayAddrPending(false), relayPendingLen(0),
+    pairingEnabled(false), pairingActive(false), pairingLocked(false),
+    pairingWindowMs(10000), pairingStartMs(0), pairingBestRssi(RSSI_UNKNOWN) {
   memset(dmxBuffer, 0, DMX_UNIVERSE_SIZE);
   memset(pairingBestMac, 0, 6);
   memset(pairedMac, 0, 6);
+  memset(relayAddr, 0xFF, 6); // default: broadcast
   instance = this;
 }
 
 bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   hasLastSessionId = false;
   hasLastSequence = false;
+  hasLastFrameId = false;
   lastSessionId = 0;
   lastSequence = 0;
+  lastFrameId = 0;
   lastRssi = RSSI_UNKNOWN;
   resetPairing();
   if (registerInternalEspNow) {
@@ -47,6 +54,7 @@ bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
     espNowInitialized = true;
   }
 
+  // Register broadcast peer (used for receiving and for relay sends to broadcast)
   esp_now_peer_info_t peer = {};
   memset(peer.peer_addr, 0xFF, 6);
   peer.channel = 0;
@@ -55,6 +63,20 @@ bool ESPNowDMX_Receiver::begin(bool registerInternalEspNow) {
   esp_err_t result = esp_now_add_peer(&peer);
   if (result != ESP_OK && result != ESP_ERR_ESPNOW_EXIST) {
     return false;
+  }
+
+  // If a non-broadcast relay address was set before begin(), register it now.
+  bool isDefaultBroadcast = true;
+  for (int i = 0; i < 6; i++) {
+    if (relayAddr[i] != 0xFF) { isDefaultBroadcast = false; break; }
+  }
+  if (relayAddrPending && !isDefaultBroadcast) {
+    esp_now_peer_info_t relayPeer = {};
+    memcpy(relayPeer.peer_addr, relayAddr, 6);
+    relayPeer.channel = 0;
+    relayPeer.encrypt = false;
+    esp_now_add_peer(&relayPeer); // best-effort; ignore error
+    relayAddrPending = false;
   }
 
   return true;
@@ -66,6 +88,28 @@ void ESPNowDMX_Receiver::setDMXReceiveCallback(DMXReceiveCallback cb) {
 
 void ESPNowDMX_Receiver::setUniverseId(uint8_t universe) {
   universeId = universe;
+}
+
+void ESPNowDMX_Receiver::enableRelay(bool enable) {
+  relayEnabled = enable;
+}
+
+void ESPNowDMX_Receiver::setRelayAddr(const uint8_t mac[6]) {
+  memcpy(relayAddr, mac, 6);
+  if (espNowInitialized) {
+    esp_now_peer_info_t relayPeer = {};
+    memcpy(relayPeer.peer_addr, relayAddr, 6);
+    relayPeer.channel = 0;
+    relayPeer.encrypt = false;
+    esp_now_add_peer(&relayPeer); // best-effort; ESP_ERR_ESPNOW_EXIST is fine
+    relayAddrPending = false;
+  } else {
+    relayAddrPending = true;
+  }
+}
+
+void ESPNowDMX_Receiver::relayPacket(const uint8_t *data, int len) {
+  esp_now_send(relayAddr, data, (size_t)len);
 }
 
 bool ESPNowDMX_Receiver::handleReceive(const uint8_t *mac, const uint8_t *data, int len, int8_t rssi) {
@@ -148,6 +192,9 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
   if (version != PROTOCOL_VERSION) {
     return;
   }
+  // Byte 8: frameId -- same for all chunks of one original sendRange() call.
+  uint8_t frameId = data[8];
+
   const uint8_t *payload = data + PACKET_HEADER_SIZE;
   size_t payloadLen = len - PACKET_HEADER_SIZE;
 
@@ -171,7 +218,9 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
     lastSessionId = sessionId;
     hasLastSessionId = true;
     hasLastSequence = false;
+    hasLastFrameId = false;
     lastSequence = 0;
+    lastFrameId = 0;
     memset(dmxBuffer, 0, sizeof(dmxBuffer));
   }
 
@@ -182,7 +231,7 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
   if (hasLastSequence) {
     uint16_t diff = seq - lastSequence;
     if (diff == 0) {
-      return; // duplicate packet
+      return; // duplicate packet (also catches relayed-back packets)
     }
     if (diff > 0x8000) {
       return; // older packet
@@ -196,25 +245,20 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
   // Decompress or copy raw data based on compression flag
   size_t decompressedLen = 0;
   if (compressionType == COMPRESSION_HEATSHRINK) {
-    // Decompress heatshrink data
     size_t maxWritable = DMX_UNIVERSE_SIZE - offset;
     decompressedLen = decompressData(payload, payloadLen, dmxBuffer + offset, maxWritable);
     if (decompressedLen == 0) {
-      // Decompression failed, discard packet
       return;
     }
   } else if (compressionType == COMPRESSION_NONE) {
-    // Raw uncompressed data
     size_t maxWritable = DMX_UNIVERSE_SIZE - offset;
     if (payloadLen > maxWritable) {
-      // Invalid offset/length
       return;
     }
     memcpy(dmxBuffer + offset, payload, payloadLen);
     decompressedLen = payloadLen;
   } else {
-    // Unknown compression type, discard
-    return;
+    return; // unknown compression type
   }
 
 #if ESPNOW_DMX_DEBUG
@@ -222,21 +266,50 @@ void ESPNowDMX_Receiver::processPacket(const uint8_t *mac, const uint8_t *data, 
   unsigned long packetNow = millis();
   if (packetNow - lastPacketLog >= 500) {
     lastPacketLog = packetNow;
-    ESPNOW_DMX_LOG("[RX] seq=%u offset=%u len=%u comp=%s", seq, offset, decompressedLen,
+    ESPNOW_DMX_LOG("[RX] seq=%u frameId=%u offset=%u len=%u comp=%s", seq, frameId, offset, decompressedLen,
                    compressionType == COMPRESSION_HEATSHRINK ? "HS" : "RAW");
   }
 #endif
 
-  if (userCallback) {
+  // Frame-level deduplication: only fire user callback on new frameId.
+  // This ensures the callback runs exactly once per original sender frame
+  // even when multiple relay paths deliver different chunks of the same frame.
+  bool isNewFrame = !hasLastFrameId || (frameId != lastFrameId);
+  if (isNewFrame) {
+    hasLastFrameId = true;
+    lastFrameId = frameId;
+  }
+
+  if (userCallback && isNewFrame) {
     userCallback(universe, dmxBuffer);
 #if ESPNOW_DMX_DEBUG
     static unsigned long lastFrameLog = 0;
     unsigned long frameNow = millis();
     if (frameNow - lastFrameLog >= 1000) {
       lastFrameLog = frameNow;
-      ESPNOW_DMX_LOG("[RX] DMX frame delivered (universe %u)", universe);
+      ESPNOW_DMX_LOG("[RX] DMX frame delivered (universe %u, frameId %u)", universe, frameId);
     }
 #endif
+  }
+
+  // Relay: buffer the packet; actual esp_now_send() is deferred to
+  // relayLoop() to avoid calling it from within the ESP-NOW receive callback
+  // (which can silently fail or deadlock on some ESP32 configurations).
+  if (relayEnabled && len <= (int)sizeof(relayPendingBuf)) {
+    memcpy(relayPendingBuf, data, len);
+    relayPendingLen = len; // volatile write; relayLoop() drains this
+  }
+}
+
+
+void ESPNowDMX_Receiver::relayLoop() {
+  // Called from loop(). Drains the relay buffer set by processPacket().
+  // Sending outside the receive callback avoids potential re-entrancy
+  // issues with the ESP32 WiFi/ESP-NOW stack.
+  int len = relayPendingLen;
+  if (len > 0) {
+    relayPendingLen = 0; // clear before send; a new packet can arrive during send
+    esp_now_send(relayAddr, relayPendingBuf, (size_t)len);
   }
 }
 

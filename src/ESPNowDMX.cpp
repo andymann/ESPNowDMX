@@ -38,6 +38,10 @@ void ESPNowDMX::loop() {
 
   if (_mode == ESPNOW_DMX_MODE_SENDER) {
     _sender.loop();
+  } else {
+    // Drain relay buffer: actually sends the deferred esp_now_send()
+    // outside the receive callback to avoid WiFi stack re-entrancy issues.
+    _receiver.relayLoop();
   }
 }
 
@@ -166,4 +170,26 @@ void ESPNowDMX::clearUnicastPeers() {
 
 uint8_t ESPNowDMX::getUnicastPeerCount() const {
   return _mode == ESPNOW_DMX_MODE_SENDER ? _sender.getUnicastPeerCount() : 0;
+}
+
+void ESPNowDMX::enableRelay(bool enable) {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.enableRelay(enable);
+  }
+}
+
+bool ESPNowDMX::isRelayEnabled() const {
+  return _mode == ESPNOW_DMX_MODE_RECEIVER ? _receiver.isRelayEnabled() : false;
+}
+
+void ESPNowDMX::setRelayAddr(const uint8_t mac[6]) {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.setRelayAddr(mac);
+  }
+}
+
+void ESPNowDMX::relayLoop() {
+  if (_mode == ESPNOW_DMX_MODE_RECEIVER) {
+    _receiver.relayLoop();
+  }
 }

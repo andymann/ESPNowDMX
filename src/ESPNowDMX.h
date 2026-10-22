@@ -55,6 +55,15 @@ public:
 	void clearUnicastPeers();
 	uint8_t getUnicastPeerCount() const;
 
+	// Relay / range extension (receiver mode only; no-ops otherwise).
+	// See ESPNowDMX_Receiver for details.
+	void enableRelay(bool enable);
+	bool isRelayEnabled() const;
+	void setRelayAddr(const uint8_t mac[6]);
+	// Drain the relay send queue; call from sketch loop() when relay is enabled.
+	// (loop() already calls this internally; only needed if you bypass loop().)
+	void relayLoop();
+
 private:
 	ESPNowDMXMode _mode;
 	bool _initialized;

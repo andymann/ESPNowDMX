@@ -51,7 +51,7 @@ enum PacketType : uint8_t {
   PACKET_TYPE_DATA_CHUNK = 0x01,
 };
 
-// Compression flags (low nibble of header byte 6).
+// Compression flags (low nibble of header byte 7).
 enum CompressionType : uint8_t {
   COMPRESSION_NONE = 0x00,
   COMPRESSION_HEATSHRINK = 0x01,
@@ -62,15 +62,27 @@ enum CompressionType : uint8_t {
 // frame counters, etc.) reject mismatched peers gracefully instead of
 // silently corrupting state. Bump this when the on-wire format changes.
 //
+// Version history:
+//   0x01 - initial release
+//   0x02 - added pairing / RSSI
+//   0x03 - added frameId (byte 8); PACKET_HEADER_SIZE 8 -> 9
+//
 // Receivers running an older version see an unknown high nibble and
-// drop the packet via the existing "unknown compression type" branch —
+// drop the packet via the existing "unknown compression type" branch --
 // no garbled state, no reboot loop. After upgrading, reflash everything.
-constexpr uint8_t PROTOCOL_VERSION = 0x02;
+constexpr uint8_t PROTOCOL_VERSION = 0x03;
 constexpr uint8_t PROTOCOL_VERSION_MASK = 0xF0;
 constexpr uint8_t COMPRESSION_MASK = 0x0F;
 
-// DMX data chunk packet header size
-constexpr uint8_t PACKET_HEADER_SIZE = 8; // type(1) + universe(1) + session(1) + seq(2) + offset(2) + version|compression(1)
+// DMX data chunk packet header layout (9 bytes):
+//   [0]    packet type
+//   [1]    universe id
+//   [2]    session id
+//   [3..4] sequence number (big-endian, per-chunk)
+//   [5..6] chunk offset (big-endian)
+//   [7]    high nibble = PROTOCOL_VERSION, low nibble = CompressionType
+//   [8]    frameId  (incremented once per sendRange() call by the original sender)
+constexpr uint8_t PACKET_HEADER_SIZE = 9;
 
 // Max DMX data chunk per packet
 constexpr uint16_t MAX_DMX_CHUNK_SIZE = ESP_NOW_MAX_PAYLOAD - PACKET_HEADER_SIZE;

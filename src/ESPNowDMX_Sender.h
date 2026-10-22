@@ -85,6 +85,12 @@ private:
   uint8_t universeId;
   uint8_t broadcastAddr[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
+  // frameId is incremented once at the start of each sendRange() call so
+  // all chunks of a single transmission share the same frameId. Receivers
+  // use this to fire the user callback exactly once per original frame even
+  // when redundant relay paths deliver duplicate or out-of-order chunks.
+  uint8_t frameId;
+
   // Unicast peers. When unicastCount > 0, sendChunk() targets these
   // addresses instead of broadcastAddr.
   uint8_t unicastAddrs[MAX_UNICAST_PEERS][6];
